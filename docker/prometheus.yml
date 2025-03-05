@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s  # Default interval for scraping metrics
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['172.27.36.125:9093']  # Address of your Alertmanager (or use AWS alerting)
+
+rule_files:
+  - "alert.rules.yml"  # Path to your alerting rules file (ensure you create alert.rules.yml)
+
+scrape_configs:
+  - job_name: 'docker'
+    docker_sd_configs:
+      - host: 'tcp://172.27.36.125:2375'  # Use TCP connection to Docker
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['172.27.36.125:9090']  # Scraping Prometheus itself
+
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['172.27.36.125:9100']  # Node Exporter scraping
+
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['172.27.36.125:3000']  # Grafana scraping
+
+  - job_name: 'custom_app'
+    static_configs:
+      - targets: ['172.27.36.125:8001']
+
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["172.27.36.125:8080"] 
+
+  
+    # metrics_path: '/metrics'
+    # scheme: 'http'  # This is sufficient to indicate HTTP

@@ -1,0 +1,40 @@
+groups:
+- name: example_alerts
+  rules:
+  - alert: HighCpuUsage
+    expr: rate(container_cpu_usage_seconds_total{container_name="python-app-assignment"}[5m]) > 0.5
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      description: "The CPU usage for container python-app-assignment is high."
+      summary: "CPU usage has been above 50% for 2 minutes."
+
+  - alert: HighMemoryUsage
+    expr: container_memory_usage_bytes{container_name="python-app-assignment"} > 500000000
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      description: "The memory usage for container python-app-assignment is high."
+      summary: "Memory usage has been above 500MB for 2 minutes."
+
+  - alert: ContainerDown
+    expr: up{container_name="python-app-assignment"} == 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      description: "The python-app-assignment container is down."
+      summary: "The python-app-assignment container has been down for 5 minutes."
+
+   
+  - alert: PythonAppDown
+    expr: up{job="docker", container_name="python-app-assignment"} == 0
+    for: 1m  # Trigger the alert if the container is down for 1 minute
+    labels:
+      severity: critical
+    annotations:
+      summary: "Python App container is down"
+      description: "The Python App container has been down for more than 1 minute"
+

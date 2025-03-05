@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    user: root  # Run the container as root
+    ports:
+      - "9090:9090"  # Expose Prometheus on port 9090
+    networks:
+      - monitoring  # Make sure this matches your network configuration
+    restart: always  # Ensure Prometheus restarts automatically on container restart
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml  # Add this to mount the config file
+      - prometheus_data:/var/lib/prometheus
+      - ./alert.rules.yml:/etc/prometheus/alert.rules.yml 
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SERVER_HTTP_PORT=3000
+      - GF_SECURITY_ALLOW_EMBEDDING=true  # Allow embedding dashboards
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - monitoring
+
+  node_exporter:
+    image: prom/node-exporter
+    container_name: node_exporter
+    ports:
+      - "9100:9100"
+    networks:
+      - monitoring
+  
+  python-app-assignment:
+    # image: shradha1919/python-app-assignment:1.0
+    image: python-app-assignment:latest
+    ports:
+      - "8001:8000"
+    environment:
+      - PORT=8000
+      - DOCKER_URL=tcp://172.27.36.125:2375
+      - PROMETHEUS_HOST="0.0.0.0"
+      - PROMETHEUS_PORT="5000" 
+      - PROMETHEUS_URL=172.27.36.125:9090
+    networks:
+      - monitoring
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: cadvisor
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+  alertmanager:
+    image: prom/alertmanager
+    container_name: alertmanager
+    networks:
+      - monitoring  # Make sure Alertmanager is part of the monitoring network
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  grafana_data:
+  prometheus_data:

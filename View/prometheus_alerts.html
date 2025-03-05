@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prometheus Alerts</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container">
+        <h1 class="my-4">Active Prometheus Alerts</h1>
+        
+        <!-- Display Prometheus Alerts -->
+        {% if alerts %}
+            <ul class="list-group">
+                {% for alert in alerts %}
+                    <li class="list-group-item">
+                        <strong>{{ alert.alertname }}</strong> (Severity: {{ alert.severity }})<br>
+                        Instance: {{ alert.instance }}<br>
+                        State: {{ alert.state }}<br>
+                        Description: {{ alert.description }}
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p>No active alerts at the moment.</p>
+        {% endif %}
+    </div>
+</body>
+</html>
