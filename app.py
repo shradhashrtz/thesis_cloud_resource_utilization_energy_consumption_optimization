@@ -1,5 +1,5 @@
 import threading
-from flask import Flask, Response, jsonify, render_template
+from flask import Flask, Response, jsonify, render_template, request
 import logging
 import os
 
@@ -98,43 +98,71 @@ def metrics_status():
     
 @app.route('/prometheus_alerts', methods=['GET'])
 def prometheus_alerts():
-    """
-    Fetch and display active Prometheus alerts on a separate route.
-    """
     try:
-        # Fetch active alerts from Prometheus
         alerts = fetch_prometheus_alerts()
-
-        # Return the alerts to the template
         return render_template("prometheus_alerts.html", alerts=alerts)
     except Exception as e:
         logging.error(f"Error fetching alerts from Prometheus: {e}")
         return render_template("error.html", error_message=str(e))
 
-def fetch_prometheus_alerts():
-    """
-    Fetch active alerts from Prometheus /alerts endpoint.
-    """
+@app.route('/resolve_alert', methods=['POST'])
+def resolve_alert():
+    """Handles user request to acknowledge or resolve alerts."""
+    alert_name = request.form.get("alertname")
     try:
-        response = requests.get(f"{os.getenv('PROMETHEUS_URL', '')}/api/v1/alerts")
+        # Fetch active alerts from Alertmanager v2 API
+        alert_id = fetch_alert_id(alert_name)
+        
+        if not alert_id:
+            logging.error(f"Alert {alert_name} not found")
+            return jsonify({"status": "error", "message": f"Alert {alert_name} not found."})
+        
+        # Resolve the alert using the v2 API
+        response = requests.post(f"{os.getenv('ALERTMANAGER_URL', 'http://localhost:9093')}/api/v2/alerts/{alert_id}/resolve")
+        
+        if response.status_code == 200:
+            logging.info(f"Alert resolved: {alert_name}")
+            return jsonify({"status": "success", "message": f"Alert {alert_name} resolved."})
+        else:
+            logging.error(f"Failed to resolve alert {alert_name}: {response.text}")
+            return jsonify({"status": "error", "message": "Failed to resolve alert"})
+    
+    except Exception as e:
+        logging.error(f"Error resolving alert: {e}")
+        return jsonify({"status": "error", "message": "Error resolving alert"})
+
+def fetch_prometheus_alerts():
+    """Fetch active alerts from Prometheus /alerts endpoint."""
+    try:
+        response = requests.get(f"{os.getenv('ALERTMANAGER_URL', 'http://172.27.36.125:9093')}/api/v2/alerts")
         response.raise_for_status()
         alerts_data = response.json()
+        return [{
+            "alertname": alert['labels'].get('alertname', 'No alertname provided'),
+            "severity": alert['labels'].get('severity', 'No severity provided'),
+            "instance": alert['labels'].get('instance', 'No instance provided'),
+            "description": alert['annotations'].get('description', 'No description provided'),
+            "state": alert['status'].get('state', 'No state provided'),
+        } for alert in alerts_data]
 
-        active_alerts = []
-        for alert in alerts_data['data']['alerts']:
-            alert_info = {
-                "alertname": alert['labels']['alertname'],
-                "severity": alert['labels']['severity'],
-                "instance": alert['labels']['instance'],
-                "description": alert['annotations'].get('description', 'No description provided'),
-                "state": alert['state'],
-            }
-            active_alerts.append(alert_info)
-
-        return active_alerts
     except Exception as e:
-        logging.error(f"Error fetching alerts from Prometheus: {e}")
+        logging.error(f"Error fetching alerts from Alertmanager: {e}")
         return []
+
+def fetch_alert_id(alert_name):
+    """Fetch alert ID from Alertmanager based on alert name."""
+    try:
+        response = requests.get(f"{os.getenv('ALERTMANAGER_URL', 'http://localhost:9093')}/api/v2/alerts")
+        if response.status_code == 200:
+            alerts = response.json()
+            for alert in alerts:
+                if alert['labels']['alertname'] == alert_name:
+                    return alert['id']  # Assuming 'id' is the correct field in the v2 API response
+        return None
+    except Exception as e:
+        logging.error(f"Error fetching alert ID for {alert_name}: {e}")
+        return None
+
 
 def evaluate_utilization(custom_metrics, docker_metrics):
     status_messages = []
@@ -312,3 +340,9 @@ if __name__ == "__main__":
 # . venvpy/bin/activate
 
 # pip install -r requirements.txt
+
+
+
+
+
+

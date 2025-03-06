@@ -38,3 +38,12 @@ groups:
       summary: "Python App container is down"
       description: "The Python App container has been down for more than 1 minute"
 
+  - alert: TestAlert
+    expr: up == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      description: "Test Alert"
+
+

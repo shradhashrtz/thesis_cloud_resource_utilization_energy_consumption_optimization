@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prometheus Alerts</title>
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -19,6 +20,8 @@
                         Instance: {{ alert.instance }}<br>
                         State: {{ alert.state }}<br>
                         Description: {{ alert.description }}
+                        <!-- Resolve Alert Button -->
+                        <button class="btn btn-danger resolve-alert" data-alertname="{{ alert.alertname }}">Resolve</button>
                     </li>
                 {% endfor %}
             </ul>
@@ -26,5 +29,27 @@
             <p>No active alerts at the moment.</p>
         {% endif %}
     </div>
+
+    <script>
+        // Handle alert resolution via AJAX
+        $(".resolve-alert").click(function() {
+            var alertname = $(this).data("alertname");  // Get the alert name from the button data
+            $.ajax({
+                url: '/resolve_alert',
+                method: 'POST',
+                data: { alertname: alertname },
+                success: function(response) {
+                    alert(response.message);  // Show success message
+                    if (response.status === 'success') {
+                        // Optionally remove the alert from the list if resolved
+                        $(`[data-alertname='${alertname}']`).closest("li").fadeOut();
+                    }
+                },
+                error: function() {
+                    alert('Error resolving the alert');
+                }
+            });
+        });
+    </script>
 </body>
 </html>

@@ -1,11 +1,6 @@
-global:
-  slack_api_url: 'https://outlook.office.com/webhook/your-webhook-url'
-
 route:
-  receiver: 'teams-notifications'
+  receiver: 'default-receiver'
 
 receivers:
-  - name: 'teams-notifications'
-    slack_configs:
-      - channel: '#alerts'
-        send_resolved: true
+  - name: 'default-receiver'
+    # Optionally, you can leave this empty if you don't want to actually notify anywhere
