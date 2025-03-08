@@ -1,49 +1,93 @@
 groups:
-- name: example_alerts
+- name: real_time_alerts
   rules:
+  
+  # High CPU Usage Alert for Any Docker Container
   - alert: HighCpuUsage
-    expr: rate(container_cpu_usage_seconds_total{container_name="python-app-assignment"}[5m]) > 0.5
+    expr: rate(container_cpu_usage_seconds_total{container_name=~".+"}[5m]) > 0.5
     for: 2m
     labels:
       severity: critical
+      source: "docker"
     annotations:
-      description: "The CPU usage for container python-app-assignment is high."
-      summary: "CPU usage has been above 50% for 2 minutes."
+      description: "High CPU usage detected for container {{ $labels.container_name }}."
+      summary: "CPU usage exceeded 50% for container {{ $labels.container_name }}."
 
+  # High Memory Usage Alert for Any Docker Container
   - alert: HighMemoryUsage
-    expr: container_memory_usage_bytes{container_name="python-app-assignment"} > 500000000
+    expr: container_memory_usage_bytes{container_name=~".+"} > 500000000
     for: 2m
     labels:
       severity: critical
+      source: "docker"
     annotations:
-      description: "The memory usage for container python-app-assignment is high."
-      summary: "Memory usage has been above 500MB for 2 minutes."
+      description: "High memory usage detected for container {{ $labels.container_name }}."
+      summary: "Memory usage exceeded 500MB for container {{ $labels.container_name }}."
 
+  # Docker Container Down Alert
   - alert: ContainerDown
-    expr: up{container_name="python-app-assignment"} == 0
+    expr: up{container_name=~".+"} == 0
     for: 5m
     labels:
       severity: critical
+      source: "docker"
     annotations:
-      description: "The python-app-assignment container is down."
-      summary: "The python-app-assignment container has been down for 5 minutes."
+      description: "Container {{ $labels.container_name }} is down."
+      summary: "Container {{ $labels.container_name }} has been down for 5 minutes."
 
-   
-  - alert: PythonAppDown
-    expr: up{job="docker", container_name="python-app-assignment"} == 0
-    for: 1m  # Trigger the alert if the container is down for 1 minute
+  # High CPU Usage Alert for Custom Application
+  - alert: HighAppCpuUsage
+    expr: rate(process_cpu_seconds_total{job=~"custom_app.+"}[5m]) > 0.7
+    for: 2m
     labels:
       severity: critical
+      source: "custom_app"
     annotations:
-      summary: "Python App container is down"
-      description: "The Python App container has been down for more than 1 minute"
+      description: "High CPU usage detected for application {{ $labels.job }}."
+      summary: "CPU usage exceeded 70% for application {{ $labels.job }}."
 
-  - alert: TestAlert
-    expr: up == 0
-    for: 1m
+  # High Memory Usage Alert for Custom Application
+  - alert: HighAppMemoryUsage
+    expr: process_resident_memory_bytes{job=~"custom_app.+"} > 1000000000
+    for: 2m
     labels:
       severity: critical
+      source: "custom_app"
     annotations:
-      description: "Test Alert"
+      description: "High memory usage detected for application {{ $labels.job }}."
+      summary: "Memory usage exceeded 1GB for application {{ $labels.job }}."
 
+  # Custom Application Down Alert
+  - alert: AppDown
+    expr: up{job=~"custom_app.+"} == 0
+    for: 5m
+    labels:
+      severity: critical
+      source: "custom_app"
+    annotations:
+      description: "Application {{ $labels.job }} is down."
+      summary: "Application {{ $labels.job }} has been down for 5 minutes."
 
+- name: test_alerts
+  interval: 30s
+  rules:
+    - alert: HighCPUUsage
+      expr: rate(process_cpu_seconds_total{job=~"custom_app.+"}[5m]) > 1
+      for: 1m
+      labels:
+        severity: critical
+        source: "custom_app"
+      annotations:
+        description: "CPU usage is high for instance {{ $labels.instance }}."
+
+- name: test_alerts1
+  interval: 30s
+  rules:
+    - alert: HighCPUUsage
+      expr: process_cpu_seconds_total > 1
+      for: 1m
+      labels:
+        severity: critical
+        source: "custom_app"
+      annotations:
+        description: "CPU usage is high for instance {{ $labels.instance }}."

@@ -21,8 +21,11 @@
                         State: {{ alert.state }}<br>
                         Description: {{ alert.description }}
                         <!-- Resolve Alert Button -->
-                        <button class="btn btn-danger resolve-alert" data-alertname="{{ alert.alertname }}">Resolve</button>
-                    </li>
+                        <button class="btn btn-danger resolve-alert" data-alertname="{{ alert.alertname }}" 
+                        data-container="{{ alert.instance }}" data-source="{{ alert.source }}">
+                        Resolve
+                    </button>
+                                        </li>
                 {% endfor %}
             </ul>
         {% else %}
@@ -32,24 +35,35 @@
 
     <script>
         // Handle alert resolution via AJAX
-        $(".resolve-alert").click(function() {
-            var alertname = $(this).data("alertname");  // Get the alert name from the button data
-            $.ajax({
-                url: '/resolve_alert',
-                method: 'POST',
-                data: { alertname: alertname },
-                success: function(response) {
-                    alert(response.message);  // Show success message
-                    if (response.status === 'success') {
-                        // Optionally remove the alert from the list if resolved
-                        $(`[data-alertname='${alertname}']`).closest("li").fadeOut();
-                    }
-                },
-                error: function() {
-                    alert('Error resolving the alert');
-                }
-            });
-        });
+       // Handle alert resolution via AJAX
+// Handle alert resolution via AJAX
+$(".resolve-alert").click(function() {
+    var alertname = $(this).data("alertname");
+    var containerName = $(this).data("container");  // Fetch container name
+    var source = $(this).data("source");  // Fetch source
+
+    $.ajax({
+        url: '/resolve_alert',
+        method: 'POST',
+        contentType: "application/json",
+        data: JSON.stringify({
+            alertname: alertname,
+            container_name: containerName,
+            source: source  // Pass source in the request
+        }),
+        success: function(response) {
+            alert(response.message);
+            if (response.status === 'success') {
+                $(`[data-alertname='${alertname}']`).closest("li").fadeOut();
+            }
+        },
+        error: function() {
+            alert('Error resolving the alert');
+        }
+    });
+});
+
+
     </script>
 </body>
 </html>

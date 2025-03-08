@@ -4,12 +4,13 @@ import logging
 import os
 
 from CustomAppMetrics import CustomAppMetricsMonitor
+from ResolveAlert import ResolveAlert
 from DockerMetrics import DockerMetricsMonitor
 from prometheus_client.parser import text_fd_to_metric_families
 from io import StringIO
-import docker
 import psutil
 import requests
+import docker
 
 
 
@@ -23,6 +24,7 @@ app = Flask(__name__, template_folder='View')
 # Initialize CustomAppMetrics
 app_names = ["custom_app"]
 custom_app_metrics = CustomAppMetricsMonitor(app_names)
+resolve_alerts = ResolveAlert()
 
 # Initialize DockerMetrics
 docker_metrics = DockerMetricsMonitor()
@@ -76,60 +78,87 @@ def grafana_dashboard():
 
 @app.route('/metrics_status', methods=['GET'])
 def metrics_status():
-    """
-    Show utilization status for each Docker container and application with HTML formatting.
-    """
     try:
+        # Fetch custom app metrics and Docker service metrics
         custom_metrics_data = custom_app_metrics.get_metrics()
-        docker_metrics_data = docker_metrics.get_metrics()
+        docker_metrics_data = docker_metrics.get_metrics()  # This should now fetch service-level metrics
 
         # Get recommendations and evaluate utilization
-        status_messages = evaluate_utilization(custom_metrics_data, docker_metrics_data)
+        status_messages = evaluate_utilization()
 
-        if not status_messages:
-            return render_template("status.html", message="✅ All applications and containers are running optimally.")
+        # Fetch Prometheus alerts
+        alerts = fetch_prometheus_alerts()
 
-        # Format the output with HTML for better styling using Bootstrap
-        return render_template("metrics_status.html", status_messages=status_messages)
+        # If no status messages or alerts, show success message
+        if not status_messages and not alerts:
+            return render_template("status.html", message="✅ All applications, services, and alerts are optimal.")
+
+        # Combine status messages and alerts into a single data structure
+        return render_template("metrics_status.html", status_messages=status_messages, alerts=alerts)
 
     except Exception as e:
         logging.error(f"Error evaluating metrics: {e}")
         return render_template("error.html", error_message=str(e))
-    
-@app.route('/prometheus_alerts', methods=['GET'])
-def prometheus_alerts():
-    try:
-        alerts = fetch_prometheus_alerts()
-        return render_template("prometheus_alerts.html", alerts=alerts)
-    except Exception as e:
-        logging.error(f"Error fetching alerts from Prometheus: {e}")
-        return render_template("error.html", error_message=str(e))
 
+
+# Flask routes for alert handling
 @app.route('/resolve_alert', methods=['POST'])
 def resolve_alert():
-    """Handles user request to acknowledge or resolve alerts."""
-    alert_name = request.form.get("alertname")
-    try:
-        # Fetch active alerts from Alertmanager v2 API
-        alert_id = fetch_alert_id(alert_name)
+    # Get the data sent by the frontend
+    data = request.get_json()  # Get the JSON data
+    alert_name = data.get("alertname")
+    container_name = data.get("container_name")
+    source = data.get("source")  # Fetch source
+
+    if not alert_name or not container_name or not source:
+        return jsonify({"status": "error", "message": "Missing alertname, container_name, or source"}), 400
+
+    # Perform resolution based on the alertname and source
+    if source == "docker":
+        if alert_name == "HighCpuUsage":
+            resolve_alerts.handle_high_cpu_usage(container_name)
+        elif alert_name == "HighMemoryUsage":
+            resolve_alerts.handle_high_memory_usage(container_name)
+    elif source == "custom_app":
+        if alert_name == "HighAppCpuUsage":
+            resolve_alerts.handle_app_high_cpu_usage(container_name)
+        elif alert_name == "HighAppMemoryUsage":
+            resolve_alerts.handle_app_high_memory_usage(source,container_name)
         
-        if not alert_id:
-            logging.error(f"Alert {alert_name} not found")
-            return jsonify({"status": "error", "message": f"Alert {alert_name} not found."})
-        
-        # Resolve the alert using the v2 API
-        response = requests.post(f"{os.getenv('ALERTMANAGER_URL', 'http://localhost:9093')}/api/v2/alerts/{alert_id}/resolve")
-        
-        if response.status_code == 200:
-            logging.info(f"Alert resolved: {alert_name}")
-            return jsonify({"status": "success", "message": f"Alert {alert_name} resolved."})
-        else:
-            logging.error(f"Failed to resolve alert {alert_name}: {response.text}")
-            return jsonify({"status": "error", "message": "Failed to resolve alert"})
+
+    return jsonify({"status": "success", "message": f"Alert {alert_name} for {container_name} from {source} resolved."})
+
+# @app.route('/scale_up', methods=['POST'])
+# def scale_up():
+#     data = request.json
+#     container_name = data['container']
     
-    except Exception as e:
-        logging.error(f"Error resolving alert: {e}")
-        return jsonify({"status": "error", "message": "Error resolving alert"})
+#     # Create a new container instance
+#     docker_url = os.getenv('DOCKER_URL', 'tcp://localhost:2375')
+#     dockerClient = docker.DockerClient(base_url=docker_url)
+#     new_container = dockerClient.containers.run(
+#         "your_docker_image",
+#         detach=True,
+#         name=f"{container_name}_scaled",
+#         ports={"5000/tcp": None}  # Map to a free port
+#     )
+
+#     return jsonify({"message": "Scaled up", "container_id": new_container.id})
+
+# @app.route('/scale_down', methods=['POST'])
+# def scale_down():
+#     data = request.json
+#     container_name = data['container']
+
+#     # Find and remove the container
+#     docker_url = os.getenv('DOCKER_URL', 'tcp://localhost:2375')
+#     dockerClient = docker.DockerClient(base_url=docker_url)
+#     containers = dockerClient.containers.list(filters={"name": container_name})
+#     if containers:
+#         containers[0].remove(force=True)
+#         return jsonify({"message": "Scaled down", "container_id": containers[0].id})
+
+#     return jsonify({"error": "Container not found"}), 404
 
 def fetch_prometheus_alerts():
     """Fetch active alerts from Prometheus /alerts endpoint."""
@@ -137,119 +166,149 @@ def fetch_prometheus_alerts():
         response = requests.get(f"{os.getenv('ALERTMANAGER_URL', 'http://172.27.36.125:9093')}/api/v2/alerts")
         response.raise_for_status()
         alerts_data = response.json()
-        return [{
-            "alertname": alert['labels'].get('alertname', 'No alertname provided'),
-            "severity": alert['labels'].get('severity', 'No severity provided'),
-            "instance": alert['labels'].get('instance', 'No instance provided'),
-            "description": alert['annotations'].get('description', 'No description provided'),
-            "state": alert['status'].get('state', 'No state provided'),
-        } for alert in alerts_data]
+
+        # Loop through each alert and extract necessary data
+        alerts = []
+        for alert in alerts_data:
+            # Extract source from the labels section
+            source = alert['labels'].get('source', 'No source provided')
+
+            alert_data = {
+                "alertname": alert['labels'].get('alertname', 'No alertname provided'),
+                "severity": alert['labels'].get('severity', 'No severity provided'),
+                "instance": alert['labels'].get('instance', 'No instance provided'),
+                "description": alert['annotations'].get('description', 'No description provided'),
+                "state": alert['status'].get('state', 'No state provided'),
+                "source": source  # Add source here
+            }
+            alerts.append(alert_data)
+
+        return alerts
 
     except Exception as e:
         logging.error(f"Error fetching alerts from Alertmanager: {e}")
         return []
+    
 
-def fetch_alert_id(alert_name):
-    """Fetch alert ID from Alertmanager based on alert name."""
-    try:
-        response = requests.get(f"{os.getenv('ALERTMANAGER_URL', 'http://localhost:9093')}/api/v2/alerts")
-        if response.status_code == 200:
-            alerts = response.json()
-            for alert in alerts:
-                if alert['labels']['alertname'] == alert_name:
-                    return alert['id']  # Assuming 'id' is the correct field in the v2 API response
-        return None
-    except Exception as e:
-        logging.error(f"Error fetching alert ID for {alert_name}: {e}")
-        return None
-
-
-def evaluate_utilization(custom_metrics, docker_metrics):
+def evaluate_utilization():
     status_messages = []
 
-    # Parse custom metrics and evaluate utilization
-    custom_metrics_parsed = parse_metrics(custom_metrics)
+    # Loop through app names for custom metrics
+    for app_name in app_names:
+        # Fetch the custom application metrics from Prometheus
+        cpu_usage = get_metrics_from_prometheus(f"cpu_usage{{app='{app_name}'}}")
+        memory_usage = get_metrics_from_prometheus(f"memory_usage{{app='{app_name}'}}")
+        energy_usage = get_metrics_from_prometheus(f"energy_used_joules{{app='{app_name}'}}")
 
-    for (metric_name, labels), value in custom_metrics_parsed.items():
-        # Extract the application name
-        app_name = labels[0][1] if isinstance(labels, tuple) and len(labels) > 0 and isinstance(labels[0], tuple) else labels[0]
-        
-        # Get the total CPU and memory (replace these with your actual metrics retrieval logic)
-        total_cpu = get_total_cpu_capacity(app_name)  # This should fetch the actual CPU capacity
-        total_memory = get_total_memory_capacity(app_name)  # This should fetch the actual memory capacity
+        # Fallback to 0 if metrics are None
+        cpu_usage = cpu_usage if cpu_usage is not None else 0
+        memory_usage = memory_usage if memory_usage is not None else 0
+        energy_usage = energy_usage if energy_usage is not None else 0
 
-        # Check if the app already exists in the list
+        if cpu_usage == 0 or memory_usage == 0 or energy_usage == 0:
+            print(f"Metrics for app '{app_name}' are missing or 0. Using default values.")
+
+        # Check if app already exists in the list
         app_entry = next((entry for entry in status_messages if entry['name'] == app_name), None)
-        
         if app_entry is None:
-            # If the app does not exist, create a new entry
-            app_entry = {'name': app_name, 'cpu': None, 'memory': None, 'cpu_total': total_cpu, 'memory_total': total_memory, 'recommendation': ""}
+            app_entry = {
+                'name': app_name,
+                'cpu': cpu_usage,
+                'memory': memory_usage,
+                'energy': energy_usage,
+                'cpu_recommendation': "✅ CPU usage is optimal.",
+                'memory_recommendation': "✅ Memory usage is optimal.",
+                'energy_recommendation': "✅ Energy consumption is low."
+            }
             status_messages.append(app_entry)
 
-        if metric_name == 'cpu_usage':
-            recommendation = ""
-            if value < 70:
-                recommendation = "✅ Usage is optimal."
-            elif 70 <= value < 85:
-                recommendation = "⚠️ High CPU usage. Consider scaling or optimizing."
-            else:
-                recommendation = "❌ Critical CPU usage. Immediate scaling needed."
-            app_entry['cpu'] = value
-            app_entry['recommendation'] = recommendation
-        
-        elif metric_name == 'memory_usage':
-            recommendation = ""
-            if value < 70:
-                recommendation = "✅ Usage is optimal."
-            elif 70 <= value < 85:
-                recommendation = "⚠️ High memory usage. Consider optimizing memory consumption."
-            else:
-                recommendation = "❌ Critical memory usage. Scaling or optimization required."
-            app_entry['memory'] = value
-            app_entry['recommendation'] = recommendation
+        # Recommendation based on CPU usage
+        if cpu_usage < 70:
+            app_entry['cpu_recommendation'] = "✅ CPU usage is optimal."
+        elif 70 <= cpu_usage < 85:
+            app_entry['cpu_recommendation'] = "⚠️ High CPU usage. Consider scaling or optimizing."
+        else:
+            app_entry['cpu_recommendation'] = "❌ Critical CPU usage. Immediate scaling needed."
 
-    # Parse Docker metrics and evaluate utilization
-    docker_metrics_parsed = parse_metrics(docker_metrics)
+        # Recommendation based on memory usage
+        if memory_usage < 70:
+            app_entry['memory_recommendation'] = "✅ Memory usage is optimal."
+        elif 70 <= memory_usage < 85:
+            app_entry['memory_recommendation'] = "⚠️ High memory usage. Consider optimizing memory consumption."
+        else:
+            app_entry['memory_recommendation'] = "❌ Critical memory usage. Scaling or optimization required."
 
-    for (metric_name, labels), value in docker_metrics_parsed.items():
-        # Extract the container name
-        container_name = labels[0][1] if isinstance(labels, tuple) and len(labels) > 0 and isinstance(labels[0], tuple) else labels[0]
+        # Recommendation based on energy usage (if relevant)
+        if energy_usage < 50:
+            app_entry['energy_recommendation'] = "✅ Energy consumption is low."
+        elif 50 <= energy_usage < 75:
+            app_entry['energy_recommendation'] = "⚠️ Moderate energy consumption. Monitor usage."
+        else:
+            app_entry['energy_recommendation'] = "❌ High energy consumption. Consider optimizing."
 
-        # Get the total CPU and memory for the container (replace these with actual fetching logic)
-        total_cpu = get_container_cpu_capacity(container_name)  # This should fetch the actual CPU capacity for the container
-        total_memory = get_container_memory_capacity(container_name)  # This should fetch the actual memory capacity for the container
+    # Now evaluate Docker service metrics
+    docker_url = os.getenv('DOCKER_URL', 'tcp://localhost:2375')
+    dockerClient = docker.DockerClient(base_url=docker_url)
+    services = dockerClient.services.list()  # Get a list of all running services
 
-        # Check if the container already exists in the list
-        container_entry = next((entry for entry in status_messages if entry['name'] == container_name), None)
-        
-        if container_entry is None:
-            # If the container does not exist, create a new entry
-            container_entry = {'name': container_name, 'cpu': None, 'memory': None, 'cpu_total': total_cpu, 'memory_total': total_memory, 'recommendation': ""}
-            status_messages.append(container_entry)
+    for service in services:
+        service_name = service.name
+        # Fetch Docker service metrics from Prometheus (you might need to adjust the metric names to match those for services)
+        cpu_usage = get_metrics_from_prometheus(f"docker_service_cpu_usage_percent{{service='{service_name}'}}")
+        memory_usage = get_metrics_from_prometheus(f"docker_service_memory_usage_percent{{service='{service_name}'}}")
+        cpu_energy = get_metrics_from_prometheus(f"docker_service_cpu_energy_consumption_watt_hour{{service='{service_name}'}}")
+        memory_energy = get_metrics_from_prometheus(f"docker_service_memory_energy_consumption_watt_hour{{service='{service_name}'}}")
 
-        if metric_name == 'docker_container_cpu_usage_percent':
-            recommendation = ""
-            if value < 70:
-                recommendation = "✅ Usage is optimal."
-            elif 70 <= value < 85:
-                recommendation = "⚠️ High CPU usage. Consider scaling or optimizing workload."
-            else:
-                recommendation = "❌ Critical CPU usage. Immediate scaling needed."
-            container_entry['cpu'] = value
-            container_entry['recommendation'] = recommendation
-        
-        elif metric_name == 'docker_container_memory_usage_percent':
-            recommendation = ""
-            if value < 70:
-                recommendation = "✅ Usage is optimal."
-            elif 70 <= value < 85:
-                recommendation = "⚠️ High memory usage. Consider optimizing memory usage."
-            else:
-                recommendation = "❌ Critical memory usage. Scaling required."
-            container_entry['memory'] = value
-            container_entry['recommendation'] = recommendation
-    
+        # Fallback to 0 if any metric is None
+        cpu_usage = cpu_usage if cpu_usage is not None else 0
+        memory_usage = memory_usage if memory_usage is not None else 0
+        cpu_energy = cpu_energy if cpu_energy is not None else 0
+        memory_energy = memory_energy if memory_energy is not None else 0
+
+        if cpu_usage == 0 or memory_usage == 0 or (cpu_energy + memory_energy) == 0:
+            print(f"Metrics for service '{service_name}' are missing or 0. Using default values.")
+
+        # Check if service already exists in the list
+        service_entry = next((entry for entry in status_messages if entry['name'] == service_name), None)
+        if service_entry is None:
+            service_entry = {
+                'name': service_name,
+                'cpu': cpu_usage,
+                'memory': memory_usage,
+                'energy': cpu_energy + memory_energy,
+                'cpu_recommendation': "✅ CPU usage is optimal.",
+                'memory_recommendation': "✅ Memory usage is optimal.",
+                'energy_recommendation': "✅ Energy consumption is low."
+            }
+            status_messages.append(service_entry)
+
+        # Recommendation based on CPU usage for Docker service
+        if cpu_usage < 70:
+            service_entry['cpu_recommendation'] = "✅ CPU usage is optimal."
+        elif 70 <= cpu_usage < 85:
+            service_entry['cpu_recommendation'] = "⚠️ High CPU usage. Consider scaling or optimizing workload."
+        else:
+            service_entry['cpu_recommendation'] = "❌ Critical CPU usage. Immediate scaling needed."
+
+        # Recommendation based on memory usage for Docker service
+        if memory_usage < 70:
+            service_entry['memory_recommendation'] = "✅ Memory usage is optimal."
+        elif 70 <= memory_usage < 85:
+            service_entry['memory_recommendation'] = "⚠️ High memory usage. Consider optimizing memory usage."
+        else:
+            service_entry['memory_recommendation'] = "❌ Critical memory usage. Scaling required."
+
+        # Recommendation based on energy usage for Docker service
+        if (cpu_energy + memory_energy) < 50:
+            service_entry['energy_recommendation'] = "✅ Energy consumption is low."
+        elif 50 <= (cpu_energy + memory_energy) < 75:
+            service_entry['energy_recommendation'] = "⚠️ Moderate energy consumption. Monitor usage."
+        else:
+            service_entry['energy_recommendation'] = "❌ High energy consumption. Consider optimizing."
+
     return status_messages
+
+
 
 
 
@@ -272,51 +331,28 @@ def get_total_memory_capacity(app_name=None):
     
     return total_memory_mb  # Return the system's total memory in MB
 
-
-def get_container_cpu_capacity(container_name):
-    docker_url=os.getenv('DOCKER_URL', 'tcp://localhost:2375')
-    client =  docker.DockerClient(base_url=docker_url)  # Connect to the Docker daemon
-    container = client.containers.get(container_name)
     
-    # Get container stats (CPU, memory, etc.)
-    stats = container.stats(stream=False)
-    
-    # Retrieve the CPU count or limit; here we assume 'cpu_percent' or 'cpu_quota'
-    cpu_limit = stats['cpu_stats']['cpu_usage']['total_usage']  # Total CPU time used by the container
-    
-    # If you want to get the number of CPUs allocated to the container:
-    cpus = stats['cpu_stats']['online_cpus']  # Number of online CPUs for the container
-    
-    return cpus * 100  # Example: return total allocated CPU as percentage (multiply by 100 for percentage)
+def get_metrics_from_prometheus(query):
+    try:
+        prometheus_url=os.getenv('PROMETHEUS_URL', 'http://localhost:9090')
+        # prometheus_url = "http://localhost:9090"
 
-
-
-def get_container_memory_capacity(container_name):
-    docker_url=os.getenv('DOCKER_URL', 'tcp://localhost:2375')
-    client =  docker.DockerClient(base_url=docker_url)  # Connect to the Docker daemon
-    container = client.containers.get(container_name)
-    
-    # Get container stats (including memory usage)
-    stats = container.stats(stream=False)
-    
-    # Retrieve memory limit from the stats
-    memory_limit = stats['memory_stats']['limit']  # Total memory allocated for the container (in bytes)
-    
-    # Convert bytes to MB or GB, for example
-    memory_limit_mb = memory_limit / (1024 ** 2)  # Convert bytes to MB
-    
-    return memory_limit_mb  # Return the memory limit in MB
-
-
-
-
-
+        response = requests.get(f"{prometheus_url}/api/v1/query?query={query}")
+        data = response.json()
+        
+        if data['status'] == 'success' and data['data']['result']:
+            return float(data['data']['result'][0]['value'][1])  # return the value of the metric
+        else:
+            return None
+    except Exception as e:
+        print(f"Error querying Prometheus: {e}")
+        return None
 
 def start_docker_monitoring():
     """
     Starts Docker monitoring in a separate thread.
     """
-    docker_metrics.monitor_all_containers()
+    docker_metrics.monitor_all_services()
 
 monitoring_thread = threading.Thread(target=start_docker_monitoring)
 monitoring_thread.start()
