@@ -19,95 +19,87 @@ class ResolveAlert:
             logging.error("Failed to connect to Docker daemon: %s", e)
             raise
 
-    # Helper function to check if Docker container is running
-    def is_container_running(self, container_name):
-        try:
-            result = subprocess.run(
-                ["docker", "ps", "-q", "-f", f"name={container_name}"],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return True
-            return False
-        except Exception as e:
-            print(f"Error checking container status for {container_name}: {e}")
-            return False
 
-
- # Helper function to get a process by name
+    # Helper function to get a process by name
     def get_process_by_name(self, app_name):
         for process in psutil.process_iter(attrs=['pid', 'name']):
             if process.info['name'] == app_name:
                 return process
         return None
     
-    def handle_high_cpu_usage(self, container_name):
+    def handle_high_cpu_usage(self, service_name, cpu_limit="0.5"):
         """
-        Handle high CPU usage for a Docker container.
+        Handle high CPU usage for a Docker service by updating the CPU limit.
         """
-        print(f"Handling high CPU usage for Docker container: {container_name}")
+        print(f"Handling high CPU usage for service: {service_name}")
         try:
-            # Get the container
-            container = self.client.containers.get(container_name)
+            service = self.client.services.get(service_name)
+            spec = service.attrs['Spec']
 
-            # Update CPU limits (0.5 CPUs = 50% of one CPU core)
-            # container.update(cpu_quota=int(0.5 * 100000))  # Docker expects CPU quota in microseconds
-            container.update(cpu_quota=int(0.1 * 100000))  # Docker expects CPU quota in microseconds
-            print(f"CPU usage limited for container {container_name} to 50%.")
-        
-        except DockerException as e:
-            print(f"Docker error occurred while limiting CPU usage for {container_name}: {e}")
-        except Exception as e:
-            print(f"An error occurred while limiting CPU usage for {container_name}: {e}")
+            if 'TaskTemplate' in spec:
+                resources = spec['TaskTemplate'].get('Resources', {})
+                resources['Limits'] = resources.get('Limits', {})
 
+                # Convert CPU limit to NanoCPUs (Docker expects values in nanoseconds)
+                resources['Limits']['NanoCPUs'] = int(float(cpu_limit) * 1e9)
 
- 
+                # Update the service
+                service.update(task_template={"Resources": resources})
+                logging.info(f"Updated CPU limit for service {service_name} to {cpu_limit} CPUs")
+                print(f"CPU usage limited for service {service_name} to {cpu_limit} CPUs.")
 
-    def handle_high_memory_usage(self, container_name):
-        """
-        Handle high memory usage for a Docker container by updating memory and memory swap limits.
-        """
-        print(f"Handling high memory usage for Docker container: {container_name}")
-        try:
-            # Get the container
-            container = self.client.containers.get(container_name)
-            mem_limit = '10m'  # You can adjust this limit as needed
-
-            # Check current memoryswap setting
-            current_memoryswap = container.attrs['HostConfig'].get('MemorySwap', -1)
-
-            # Convert the mem_limit to bytes
-            mem_limit_bytes = self.convert_to_bytes(mem_limit)
-
-            # If current memoryswap is less than the memory limit, update memoryswap too
-            if current_memoryswap != -1 and current_memoryswap < mem_limit_bytes:
-                # Set both memory_limit and memswap_limit
-                container.update(mem_limit=mem_limit, memswap_limit=mem_limit)
-                print(f"Memory limit and memoryswap for container {container_name} updated to {mem_limit}.")
-            else:
-                # Only set memory_limit, leave memswap_limit to -1
-                container.update(mem_limit=mem_limit, memswap_limit='-1')
-                print(f"Memory limit for container {container_name} updated to {mem_limit}.")
+                return {"status": "success", "message": f"CPU limit updated for service {service_name} to {cpu_limit} CPUs"}
 
         except DockerException as e:
-            # Catch any errors related to Docker
-            print(f"Docker error occurred: {e}")
+            logging.error(f"Docker error while updating CPU for service {service_name}: {e}")
+            return {"status": "error", "message": str(e)}
         except Exception as e:
-            # Catch any other general errors
-            print(f"An error occurred: {e}")
+            logging.error(f"Error updating CPU for service {service_name}: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def handle_high_memory_usage(self, service_name, mem_limit="256M"):
+        """
+        Handle high memory usage for a Docker service by updating memory limits.
+        """
+        print(f"Handling high memory usage for service: {service_name}")
+        try:
+            service = self.client.services.get(service_name)
+            spec = service.attrs['Spec']
+
+            if 'TaskTemplate' in spec:
+                resources = spec['TaskTemplate'].get('Resources', {})
+                resources['Limits'] = resources.get('Limits', {})
+
+                # Convert memory limit to bytes
+                resources['Limits']['MemoryBytes'] = self.convert_to_bytes(mem_limit)
+
+                # Update the service
+                service.update(task_template={"Resources": resources})
+                logging.info(f"Updated memory limit for service {service_name} to {mem_limit}")
+                print(f"Memory limit for service {service_name} updated to {mem_limit}.")
+
+                return {"status": "success", "message": f"Memory limit updated for service {service_name} to {mem_limit}"}
+
+        except DockerException as e:
+            logging.error(f"Docker error while updating memory for service {service_name}: {e}")
+            return {"status": "error", "message": str(e)}
+        except Exception as e:
+            logging.error(f"Error updating memory for service {service_name}: {e}")
+            return {"status": "error", "message": str(e)}
 
     def convert_to_bytes(self, mem_limit):
         """
-        Convert memory limit (e.g., '128m', '1g') to bytes.
+        Convert memory limit (e.g., '128M', '1G') to bytes.
         """
-        size, unit = int(mem_limit[:-1]), mem_limit[-1].lower()
-        if unit == 'm':
+        size, unit = int(mem_limit[:-1]), mem_limit[-1].upper()
+        if unit == 'M':
             return size * 1024 * 1024  # Megabytes to bytes
-        elif unit == 'g':
+        elif unit == 'G':
             return size * 1024 * 1024 * 1024  # Gigabytes to bytes
         else:
-            raise ValueError("Unsupported memory unit. Only 'm' and 'g' are supported.")
-      
+            raise ValueError("Unsupported memory unit. Only 'M' and 'G' are supported.")
+
+          
 
              # Handle high CPU usage for custom applications
     def handle_app_high_cpu_usage(self, app_name, instance):

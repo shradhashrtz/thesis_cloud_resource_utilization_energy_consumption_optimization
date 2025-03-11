@@ -25,7 +25,7 @@ class DockerMetricsMonitor:
 
         # Define Prometheus Gauges with a "service" label to differentiate services
         self.cpu_usage = Gauge("docker_service_cpu_usage_percent", "CPU usage percent for Docker services", ["service"], registry=self.registry)
-        self.memory_usage = Gauge("docker_service_memory_usage_percent", "Memory usage percent for Docker services", ["service"], registry=self.registry)
+        self.memory_usage = Gauge("docker_service_memory_usage_mb",  "Memory usage in MB for Docker services", ["service"],  registry=self.registry)        
         self.network_sent = Gauge("docker_service_network_sent_bytes", "Network transmitted bytes per sampling interval", ["service"], registry=self.registry)
         self.network_recv = Gauge("docker_service_network_recv_bytes", "Network received bytes per sampling interval", ["service"], registry=self.registry)
         self.disk_read = Gauge("docker_service_disk_read_bytes", "Disk read bytes per sampling interval", ["service"], registry=self.registry)

@@ -13,9 +13,14 @@ services:
     networks:
       - monitoring
     volumes:
-      - prometheus_data:/var/lib/prometheus
+      - docker_prometheus_data:/var/lib/prometheus
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - ./alert.rules.yml:/etc/prometheus/alert.rules.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/var/lib/prometheus' 
+      - '--storage.tsdb.retention.time=150d'  # 5 months (adjust as needed)
+      - '--storage.tsdb.retention.size=10GB'  # Optional: Limit disk usage
 
   grafana:
     image: grafana/grafana
@@ -32,6 +37,7 @@ services:
       - GF_SECURITY_ALLOW_EMBEDDING=true
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./nginx-logs:/var/log/nginx  # Mount logs directory
     networks:
       - monitoring
 
@@ -65,21 +71,6 @@ services:
     networks:
       - monitoring
 
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.47.2
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: any
-    ports:
-      - "8080:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-    networks:
-      - monitoring
-
   alertmanager:
     image: prom/alertmanager
     deploy:
@@ -93,13 +84,27 @@ services:
     networks:
       - monitoring
 
+  nginx:
+    image: nginx:latest
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - monitoring
+
 networks:
   monitoring:
     driver: overlay
 
 volumes:
   grafana_data:
-  prometheus_data:
+  docker_prometheus_data:
+    driver: local
 
 
 # docker stack deploy -c docker-compose.yml my_thesis

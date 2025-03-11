@@ -118,6 +118,7 @@
                             <th>Alert Name</th>
                             <th>Severity</th>
                             <th>Instance</th>
+                            <th>Service Name</th>
                             <th>Description</th>
                             <th>State</th>
                             <th>Source</th>
@@ -130,6 +131,7 @@
                             <td>{{ alert.alertname }}</td>
                             <td>{{ alert.severity }}</td>
                             <td>{{ alert.instance }}</td>
+                            <td>{{ alert.service }}</td>
                             <td>{{ alert.description }}</td>
                             <td>{{ alert.state }}</td>
                             <td>{{ alert.source }}</td>
@@ -137,19 +139,19 @@
                                 <!-- Resolve Alert Button -->
                                 <button class="btn btn-danger resolve-alert" 
                                     data-alertname="{{ alert.alertname }}" 
-                                    data-service="{{ alert.instance }}" 
+                                    data-service="{{ alert.service }}" 
                                     data-source="{{ alert.source }}">
                                     Resolve Alert
                                 </button>
 
                                 <button class="btn btn-success scale-up" data-alertname="{{ alert.alertname }}" 
-                                data-service="{{ alert.instance }}">Scale Up</button>
+                                data-service="{{ alert.service }}">Scale Up</button>
                 
                                 <button class="btn btn-warning scale-down" data-alertname="{{ alert.alertname }}" 
-                                data-service="{{ alert.instance }}">Scale Down</button>
+                                data-service="{{ alert.service }}">Scale Down</button>
                 
                                 <button class="btn btn-danger resolve-alert" data-alertname="{{ alert.alertname }}" 
-                                data-service="{{ alert.instance }}">Balance</button>
+                                data-service="{{ alert.service }}">Balance</button>
                             </td>
                         </tr>
                         {% endfor %}
@@ -190,6 +192,30 @@
                 });
             });
         });
+
+        document.querySelectorAll(".resolve-alert").forEach(button => {
+        button.addEventListener("click", function() {
+            let alertname = this.getAttribute("data-alertname");
+            let service = this.getAttribute("data-service");
+            let source = this.getAttribute("data-source");
+
+            fetch("/resolve_alert", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ alertname: alertname, service: service, source: source })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`✅ Alert '${alertname}' for service '${service}' resolved successfully!`);
+                    location.reload(); // Refresh page to update alerts table
+                } else {
+                    alert(`❌ Failed to resolve alert '${alertname}': ${data.error}`);
+                }
+            })
+            .catch(error => console.error("Error resolving alert:", error));
+        });
+    });
     </script>
 </body>
 </html>

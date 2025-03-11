@@ -72,13 +72,13 @@ groups:
   interval: 30s
   rules:
     - alert: HighCPUUsage
-      expr: rate(process_cpu_seconds_total{job=~"custom_app.+"}[5m]) > 1
+      expr: rate(process_cpu_seconds_total{job=~"docker.+"}[5m]) > 1
       for: 1m
       labels:
         severity: critical
-        source: "custom_app"
+        source: "docker"
       annotations:
-        description: "CPU usage is high for instance {{ $labels.instance }}."
+        description: "CPU usage is high for service {{ $labels.service }}."
 
 - name: test_alerts1
   interval: 30s
@@ -88,6 +88,18 @@ groups:
       for: 1m
       labels:
         severity: critical
-        source: "custom_app"
+        source: "docker"
       annotations:
-        description: "CPU usage is high for instance {{ $labels.instance }}."
+        description: "CPU usage is high for service {{ $labels.service }}."
+
+- name: alert_group
+  rules:
+  - alert: HighCPUUsage
+    expr: docker_service_cpu_usage_percent{service="my_thesis_prometheus"} > 80  # Adjust threshold as needed
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      description: "High CPU usage detected for service {{ $labels.service }}. CPU usage: {{ $value }}%"
+      summary: "The CPU usage for service {{ $labels.service }} is above the threshold."
+

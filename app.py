@@ -107,58 +107,72 @@ def resolve_alert():
     # Get the data sent by the frontend
     data = request.get_json()  # Get the JSON data
     alert_name = data.get("alertname")
-    container_name = data.get("container_name")
+    service_name = data.get("service")
     source = data.get("source")  # Fetch source
 
-    if not alert_name or not container_name or not source:
+    if not alert_name or not service_name or not source:
         return jsonify({"status": "error", "message": "Missing alertname, container_name, or source"}), 400
 
     # Perform resolution based on the alertname and source
     if source == "docker":
-        if alert_name == "HighCpuUsage":
-            resolve_alerts.handle_high_cpu_usage(container_name)
+        if alert_name == "HighCPUUsage":
+            resolve_alerts.handle_high_cpu_usage(service_name)
         elif alert_name == "HighMemoryUsage":
-            resolve_alerts.handle_high_memory_usage(container_name)
+            resolve_alerts.handle_high_memory_usage(service_name)
     elif source == "custom_app":
         if alert_name == "HighAppCpuUsage":
-            resolve_alerts.handle_app_high_cpu_usage(container_name)
+            resolve_alerts.handle_app_high_cpu_usage(service_name)
         elif alert_name == "HighAppMemoryUsage":
-            resolve_alerts.handle_app_high_memory_usage(source,container_name)
+            resolve_alerts.handle_app_high_memory_usage(source,service_name)
         
 
-    return jsonify({"status": "success", "message": f"Alert {alert_name} for {container_name} from {source} resolved."})
+    return jsonify({"status": "success", "message": f"Alert {alert_name} for {service_name} from {source} resolved."})
 
-# @app.route('/scale_up', methods=['POST'])
-# def scale_up():
-#     data = request.json
-#     container_name = data['container']
-    
-#     # Create a new container instance
-#     docker_url = os.getenv('DOCKER_URL', 'tcp://localhost:2375')
-#     dockerClient = docker.DockerClient(base_url=docker_url)
-#     new_container = dockerClient.containers.run(
-#         "your_docker_image",
-#         detach=True,
-#         name=f"{container_name}_scaled",
-#         ports={"5000/tcp": None}  # Map to a free port
-#     )
+@app.route('/scale_up', methods=['POST'])
+def scale_up():
+    try:
+        data = request.json
+        service_name = data['service']
+        scale_factor = int(data.get('scale_factor', 1))  # Default to increasing by 1
 
-#     return jsonify({"message": "Scaled up", "container_id": new_container.id})
+        docker_url = os.getenv('DOCKER_URL', 'tcp://localhost:2375')
+        dockerClient = docker.DockerClient(base_url=docker_url)
 
-# @app.route('/scale_down', methods=['POST'])
-# def scale_down():
-#     data = request.json
-#     container_name = data['container']
+        service = next((s for s in dockerClient.services.list() if s.name == service_name), None)
+        if service is None:
+            return jsonify({"error": "Service not found"}), 404
 
-#     # Find and remove the container
-#     docker_url = os.getenv('DOCKER_URL', 'tcp://localhost:2375')
-#     dockerClient = docker.DockerClient(base_url=docker_url)
-#     containers = dockerClient.containers.list(filters={"name": container_name})
-#     if containers:
-#         containers[0].remove(force=True)
-#         return jsonify({"message": "Scaled down", "container_id": containers[0].id})
+        current_replicas = service.attrs['Spec']['Mode'].get('Replicated', {}).get('Replicas', 1)
+        new_replicas = current_replicas + scale_factor
 
-#     return jsonify({"error": "Container not found"}), 404
+        service.update(mode={"Replicated": {"Replicas": new_replicas}})
+        return jsonify({"message": f"Scaled up {service_name} to {new_replicas} replicas"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/scale_down', methods=['POST'])
+def scale_down():
+    try:
+        data = request.json
+        service_name = data['service']
+        scale_factor = int(data.get('scale_factor', 1))  # Default to decreasing by 1
+
+        docker_url = os.getenv('DOCKER_URL', 'tcp://localhost:2375')
+        dockerClient = docker.DockerClient(base_url=docker_url)
+
+        service = next((s for s in dockerClient.services.list() if s.name == service_name), None)
+        if service is None:
+            return jsonify({"error": "Service not found"}), 404
+
+        current_replicas = service.attrs['Spec']['Mode'].get('Replicated', {}).get('Replicas', 1)
+        new_replicas = max(0, current_replicas - scale_factor)  # Ensure replicas don't go negative
+
+        service.update(mode={"Replicated": {"Replicas": new_replicas}})
+        return jsonify({"message": f"Scaled down {service_name} to {new_replicas} replicas"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 def fetch_prometheus_alerts():
     """Fetch active alerts from Prometheus /alerts endpoint."""
@@ -177,6 +191,7 @@ def fetch_prometheus_alerts():
                 "alertname": alert['labels'].get('alertname', 'No alertname provided'),
                 "severity": alert['labels'].get('severity', 'No severity provided'),
                 "instance": alert['labels'].get('instance', 'No instance provided'),
+                "service": alert['labels'].get('service', 'No service provided'),
                 "description": alert['annotations'].get('description', 'No description provided'),
                 "state": alert['status'].get('state', 'No state provided'),
                 "source": source  # Add source here
