@@ -18,7 +18,7 @@ services:
       - ./alert.rules.yml:/etc/prometheus/alert.rules.yml
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/var/lib/prometheus' 
+      - '--storage.tsdb.path=/var/lib/prometheus'
       - '--storage.tsdb.retention.time=150d'  # 5 months (adjust as needed)
       - '--storage.tsdb.retention.size=10GB'  # Optional: Limit disk usage
 
@@ -53,7 +53,6 @@ services:
       - monitoring
 
   python-app-assignment:
-    # image: shradha1919/python-app-assignment:1.0
     image: python-app-assignment:latest
     deploy:
       replicas: 1
@@ -65,7 +64,7 @@ services:
       - PORT=8000
       - DOCKER_URL=tcp://172.27.36.125:2375
       - PROMETHEUS_HOST="0.0.0.0"
-      - PROMETHEUS_PORT="5000" 
+      - PROMETHEUS_PORT="5000"
       - PROMETHEUS_URL=http://172.27.36.125:9090
       - ALERTMANAGER_URL=http://172.27.36.125:9093
     networks:
@@ -97,6 +96,27 @@ services:
     networks:
       - monitoring
 
+  jmeter:
+    image: justb4/jmeter:latest
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+    networks:
+      - monitoring
+    volumes:
+      - ./jmeter-test-plans/tests:/tests
+      - /tmp/.X11-unix:/tmp/.X11-unix  # Mount X11 socket
+    ports:
+      - "1099:1099"
+      - "60000:60000"
+    environment:
+      - DISPLAY=${DISPLAY}  # Pass host's DISPLAY variable
+    command:
+      - -Djava.awt.headless=false
+      - -t /tests/test_plan.jmx
+ 
+
 networks:
   monitoring:
     driver: overlay
@@ -105,6 +125,3 @@ volumes:
   grafana_data:
   docker_prometheus_data:
     driver: local
-
-
-# docker stack deploy -c docker-compose.yml my_thesis
