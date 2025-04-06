@@ -79,10 +79,8 @@ def grafana_dashboard():
 @app.route('/metrics_status', methods=['GET'])
 def metrics_status():
     try:
-        # Fetch custom app metrics and Docker service metrics
-        custom_metrics_data = custom_app_metrics.get_metrics()
-        docker_metrics_data = docker_metrics.get_metrics()  # This should now fetch service-level metrics
 
+        logging.info("Starting metrics and alerts from prometheus.. ")
         # Get recommendations and evaluate utilization
         status_messages = evaluate_utilization()
 
@@ -109,10 +107,12 @@ def resolve_alert():
     alert_name = data.get("alertname")
     service_name = data.get("service")
     source = data.get("source")  # Fetch source
+    stack_name = "my_thesis_"
 
     if not alert_name or not service_name or not source:
         return jsonify({"status": "error", "message": "Missing alertname, container_name, or source"}), 400
 
+    service_name = stack_name + service_name
     # Perform resolution based on the alertname and source
     if source == "docker":
         if alert_name == "HighCPUUsage":
@@ -132,13 +132,14 @@ def resolve_alert():
 def scale_up():
     try:
         data = request.json
+        stack_name = "my_thesis_"
         service_name = data['service']
         scale_factor = int(data.get('scale_factor', 1))  # Default to increasing by 1
 
         docker_url = os.getenv('DOCKER_URL', 'tcp://localhost:2375')
         dockerClient = docker.DockerClient(base_url=docker_url)
 
-        service = next((s for s in dockerClient.services.list() if s.name == service_name), None)
+        service = next((s for s in dockerClient.services.list() if s.name == stack_name + service_name), None)
         if service is None:
             return jsonify({"error": "Service not found"}), 404
 
@@ -146,9 +147,9 @@ def scale_up():
         new_replicas = current_replicas + scale_factor
 
         service.update(mode={"Replicated": {"Replicas": new_replicas}})
-        return jsonify({"message": f"Scaled up {service_name} to {new_replicas} replicas"})
+        return jsonify({"status": "success", "message": f"Scaled up {service_name} to {new_replicas} replicas"})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "failed","error": str(e)}), 500
 
 
 @app.route('/scale_down', methods=['POST'])
@@ -156,12 +157,13 @@ def scale_down():
     try:
         data = request.json
         service_name = data['service']
+        stack_name = "my_thesis_"
         scale_factor = int(data.get('scale_factor', 1))  # Default to decreasing by 1
 
         docker_url = os.getenv('DOCKER_URL', 'tcp://localhost:2375')
         dockerClient = docker.DockerClient(base_url=docker_url)
 
-        service = next((s for s in dockerClient.services.list() if s.name == service_name), None)
+        service = next((s for s in dockerClient.services.list() if s.name == stack_name + service_name), None)
         if service is None:
             return jsonify({"error": "Service not found"}), 404
 
@@ -169,9 +171,9 @@ def scale_down():
         new_replicas = max(0, current_replicas - scale_factor)  # Ensure replicas don't go negative
 
         service.update(mode={"Replicated": {"Replicas": new_replicas}})
-        return jsonify({"message": f"Scaled down {service_name} to {new_replicas} replicas"})
+        return jsonify({"status": "success", "message": f"Scaled down {service_name} to {new_replicas} replicas"})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"status": "failed","error": str(e)}), 500
 
 
 def fetch_prometheus_alerts():
@@ -186,12 +188,16 @@ def fetch_prometheus_alerts():
         for alert in alerts_data:
             # Extract source from the labels section
             source = alert['labels'].get('source', 'No source provided')
+             # Extract the instance (service) information
+            instance = alert['labels'].get('instance', 'No instance provided')
+
+            # Extract service name (ignore port if present)
+            service = instance.split(':')[0]  # Get the part before the colon (service name)
 
             alert_data = {
                 "alertname": alert['labels'].get('alertname', 'No alertname provided'),
                 "severity": alert['labels'].get('severity', 'No severity provided'),
-                "instance": alert['labels'].get('instance', 'No instance provided'),
-                "service": alert['labels'].get('service', 'No service provided'),
+                "service": service,
                 "description": alert['annotations'].get('description', 'No description provided'),
                 "state": alert['status'].get('state', 'No state provided'),
                 "source": source  # Add source here
@@ -270,7 +276,7 @@ def evaluate_utilization():
         service_name = service.name
         # Fetch Docker service metrics from Prometheus (you might need to adjust the metric names to match those for services)
         cpu_usage = get_metrics_from_prometheus(f"docker_service_cpu_usage_percent{{service='{service_name}'}}")
-        memory_usage = get_metrics_from_prometheus(f"docker_service_memory_usage_percent{{service='{service_name}'}}")
+        memory_usage = get_metrics_from_prometheus(f"docker_service_memory_usage_mb{{service='{service_name}'}}")
         cpu_energy = get_metrics_from_prometheus(f"docker_service_cpu_energy_consumption_watt_hour{{service='{service_name}'}}")
         memory_energy = get_metrics_from_prometheus(f"docker_service_memory_energy_consumption_watt_hour{{service='{service_name}'}}")
 

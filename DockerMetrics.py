@@ -48,7 +48,8 @@ class DockerMetricsMonitor:
             try:
                 # Get the containers associated with the service
                 containers = self.client.containers.list(filters={"label": f"com.docker.swarm.service.name={service_name}"})
-                
+                self.source = service_name
+
                 # Initialize metrics to aggregate service-level stats
                 total_cpu_percent = 0
                 total_mem_percent = 0
