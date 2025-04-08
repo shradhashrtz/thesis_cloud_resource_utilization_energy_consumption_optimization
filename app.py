@@ -74,7 +74,8 @@ def start_docker_monitoring():
 
 @app.route('/grafana_dashboard')
 def grafana_dashboard():
-    return render_template('metrics_dashboard.html')
+    grafana_dashboard_id = os.getenv('GRAFANA_DASHBOARD_ID', '')  # Get the private IP
+    return render_template('metrics_dashboard.html', grafana_dashboard_id=grafana_dashboard_id)
 
 @app.route('/metrics_status', methods=['GET'])
 def metrics_status():
